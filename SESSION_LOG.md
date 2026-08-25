@@ -2,6 +2,40 @@
 
 Newest entry first. The plan and its short progress log live in `docs/APP-STORE-PLAN.md`; store copy in `docs/APP-STORE-LISTING.md`.
 
+## 2026-08-25: health check, and the day-detail timezone fix
+
+### Work completed
+
+- Full health check after Cris saw only one trolley on a clear weekday. Verdict: no tracker bug. SEPTA itself had zero PCC cars out; the feed showed 19 G1 blocks with 9 real vehicles, all buses, and the tracker matched it exactly.
+- The one trolley was verified real: car 2324 appeared at 9:35 AM ET for a single 5-minute sample, and the daily push alert fired at 9:35:13 AM to 4 phones. The collector was current within one minute at check time.
+- Context pulled from the tracker's own history: Monday 8/24 had zero PCC observations all day, while the previous three Tuesdays had 4 to 6 cars and 30 to 43 trips. SEPTA has posted no alert, detour, or suspension for Route 15. Bus substitution is the inference; transponders could also simply be off.
+- Found and fixed a real bug the check surfaced: `pcc-day-detail.js` showed per-vehicle times 4 hours early (2324 read 5:35 AM instead of 9:35 AM). Root cause: the code re-parsed `toLocaleString` output into a second Date, so the Eastern zone was applied twice. Also fixed the day-boundary query, which had winter time (-05:00) hardcoded year-round.
+- Fix tested under a UTC clock like Netlify's, deployed by git push per the standing rule, and verified live with a cache-busting request. Commit `20f2d3d`.
+
+### Where this falls in the plan
+
+- Post-launch watch duty: this was the "watch the first real alerts" item working as intended. The alert pipeline, collector, and endpoints all proved healthy under a real anomaly.
+- The trolley drought itself is SEPTA's operational choice and outside the project's control.
+
+### Roadblocks and challenges
+
+- One failed push recipient in the morning alert (4 delivered, 1 failed). The sender disables tokens dead in both environments, so this self-heals by design.
+- The Netlify CLI still links this folder to the wrong project (`sjta-shuttle`); the site ID must be passed explicitly, as noted in memory on 2026-08-16.
+
+### Successes and new understandings
+
+- The two endpoints disagreed on the same timestamp (9:35 AM in pcc-stats, 5:35 AM in pcc-day-detail), and that disagreement was the thread that unraveled the bug. Cross-checking endpoints against each other is a cheap audit.
+- Server-function fixes reach the iPhone app instantly: the app bundles the UI files but calls the live Netlify functions for all data, so no App Store build was needed. UI-file changes still require a new build through review.
+- The pattern to avoid, now documented in the code: never build a Date from `toLocaleString` output and then format it with a timezone again. Use Intl to derive Eastern hours from the real UTC instant.
+
+### Pick up next session
+
+1. Watch whether PCC cars return to the G1; if the drought stretches on, the tracker's history is the evidence, and nothing needs fixing.
+2. Re-run the device search backend queries ("pcc trolley", "septa trolley") if not yet done 48 hours after release; the keyword field is the lever if still empty.
+3. Confirm the fiancee's phone can reach the listing, still the last unclosed launch thread.
+4. Keep watching push-status and Netlify credits.
+5. Banked ideas remain: whole-line vertical live view, new-trolley-in-service alert, Google Play.
+
 ## 2026-08-19 to 2026-08-20: released, and the launch-day outage
 
 ### Work completed
