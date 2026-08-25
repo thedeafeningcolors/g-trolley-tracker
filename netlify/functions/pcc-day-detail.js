@@ -29,9 +29,11 @@ export const handler = async (event) => {
     }
 
     try {
-        // Query PCC observations for the given date (Eastern time boundaries)
-        const startOfDay = `${date}T00:00:00-05:00`;
-        const endOfDay = `${date}T23:59:59-05:00`;
+        // Query PCC observations for the given date (Eastern time boundaries).
+        // Offset must follow daylight saving; it was hardcoded -05:00 until 2026-08-25.
+        const offset = easternOffset(new Date(`${date}T12:00:00Z`));
+        const startOfDay = `${date}T00:00:00${offset}`;
+        const endOfDay = `${date}T23:59:59${offset}`;
 
         const { data: observations, error } = await supabase
             .from('pcc_observations')
@@ -62,9 +64,10 @@ export const handler = async (event) => {
         const vehicleMap = {};
 
         for (const obs of observations) {
+            // Keep the real UTC instant; formatTime applies the Eastern zone once.
+            // Re-parsing toLocaleString output here double-shifted times by 4 hours until 2026-08-25.
             const dt = new Date(obs.observed_at);
-            const eastern = new Date(dt.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-            const hour = eastern.getHours();
+            const hour = easternHour(dt);
 
             // Hourly grouping
             if (!hourlyMap[hour]) {
@@ -76,18 +79,18 @@ export const handler = async (event) => {
             // Per-vehicle timeline
             if (!vehicleMap[obs.vehicle_id]) {
                 vehicleMap[obs.vehicle_id] = {
-                    firstSeen: eastern,
-                    lastSeen: eastern,
+                    firstSeen: dt,
+                    lastSeen: dt,
                     hours: new Set(),
                     observations: 0,
                     directionSequence: [] // for trip counting
                 };
             }
-            vehicleMap[obs.vehicle_id].lastSeen = eastern;
+            vehicleMap[obs.vehicle_id].lastSeen = dt;
             vehicleMap[obs.vehicle_id].hours.add(hour);
             vehicleMap[obs.vehicle_id].observations++;
             vehicleMap[obs.vehicle_id].directionSequence.push({
-                direction: obs.direction, time: eastern
+                direction: obs.direction, time: dt
             });
         }
 
@@ -168,6 +171,31 @@ export const handler = async (event) => {
         };
     }
 };
+
+// Eastern hour (0-23) of a real UTC Date. Intl does the zone math, so daylight
+// saving is handled and no fake locally-parsed Date is involved (2026-08-25).
+function easternHour(date) {
+    return Number(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        hour: 'numeric',
+        hourCycle: 'h23'
+    }).format(date));
+}
+
+// UTC offset string ("-04:00" or "-05:00") for Eastern time on the given date.
+// Same technique as push-status.js. Noon UTC is always the requested calendar
+// day in Eastern, so the offset matches the day being queried (2026-08-25).
+function easternOffset(date) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        timeZoneName: 'shortOffset'
+    }).formatToParts(date);
+    const tz = (parts.find(p => p.type === 'timeZoneName') || {}).value || 'GMT-5';
+    const m = tz.match(/GMT([+-]\d+)/);
+    const hours = m ? parseInt(m[1], 10) : -5;
+    const sign = hours < 0 ? '-' : '+';
+    return `${sign}${String(Math.abs(hours)).padStart(2, '0')}:00`;
+}
 
 function formatHour(hour) {
     if (hour === 0 || hour === 24) return '12am';
